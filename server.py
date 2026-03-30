@@ -161,6 +161,16 @@ def translate(text, source_lang, target_lang):
         print(f"  ❌ 翻译出错: {e}")
         return None
 
+# ============ 语言自动识别 ============
+def detect_language(text):
+    """通过中文字符比例自动识别语言"""
+    sample = text[:2000]
+    chinese_count = len(re.findall(r'[\u4e00-\u9fff\u3400-\u4dbf]', sample))
+    total = len(re.sub(r'\s', '', sample))
+    if total == 0:
+        return 'zh'
+    return 'zh' if (chinese_count / total) > 0.15 else 'en'
+
 # ============ 分句 ============
 def split_sentences(text):
     """智能分句，支持中英文"""
@@ -574,6 +584,11 @@ class BilingualHandler(SimpleHTTPRequestHandler):
             text = extract_text_from_pdf(pdf_bytes)
             print(f"  📄 提取文本: {len(text)} 字符")
 
+            # 自动识别语言
+            if lang == 'auto':
+                lang = detect_language(text)
+                print(f"  🔍 自动识别语言: {lang}")
+
             # 保存到书库（save_book 会自动分章）
             book_id = save_book(user_id, title, text, lang)
             if book_id:
@@ -629,6 +644,8 @@ class BilingualHandler(SimpleHTTPRequestHandler):
         if not user_id or not content.strip():
             self.send_json({"success": False, "error": "缺少用户ID或内容"})
             return
+        if lang == 'auto':
+            lang = detect_language(content)
         book_id = save_book(user_id, title, content, lang)
         if book_id:
             self.send_json({"success": True, "book_id": book_id})

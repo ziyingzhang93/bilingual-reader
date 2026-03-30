@@ -214,6 +214,7 @@
     <div class="lang-row">
       <label>输入语言：</label>
       <select class="lang-select" id="sourceLang">
+        <option value="auto">🔍 自动识别 Auto Detect</option>
         <option value="zh">中文 → 翻译成英文</option>
         <option value="en">English → 翻译成中文</option>
       </select>
@@ -235,6 +236,7 @@
     <div class="lang-row">
       <label>文件语言：</label>
       <select class="lang-select" id="fileLang">
+        <option value="auto">🔍 自动识别 Auto Detect</option>
         <option value="zh">中文 → 翻译成英文</option>
         <option value="en">English → 翻译成中文</option>
       </select>
@@ -270,6 +272,7 @@
       <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
         <input type="text" class="url-input" id="bookTitle" placeholder="书名 Book title" style="flex:1; min-width:150px;">
         <select class="lang-select" id="bookLang">
+          <option value="auto">🔍 自动</option>
           <option value="zh">中文</option>
           <option value="en">English</option>
         </select>
@@ -377,6 +380,16 @@ let currentAudio = null;
 
 const API_BASE = window.location.origin;
 
+// ============ Auto language detection ============
+function detectLanguage(text) {
+  // 统计中文字符比例
+  const sample = text.slice(0, 2000); // 只取前2000字符判断
+  const chineseChars = (sample.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
+  const totalChars = sample.replace(/\s/g, '').length;
+  if (totalChars === 0) return 'zh';
+  return (chineseChars / totalChars) > 0.15 ? 'zh' : 'en';
+}
+
 // ============ Tab switching ============
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -464,14 +477,24 @@ async function processFile() {
     return;
   }
   if (!fileContent) { showToast('请先选择文件'); return; }
-  translateAndDisplay(fileContent, document.getElementById('fileLang').value);
+  let lang = document.getElementById('fileLang').value;
+  if (lang === 'auto') {
+    lang = detectLanguage(fileContent);
+    showToast('自动识别: ' + (lang === 'zh' ? '中文 → 英文' : 'English → 中文'));
+  }
+  translateAndDisplay(fileContent, lang);
 }
 
 // ============ Process text ============
 function processText() {
   const text = document.getElementById('textInput').value.trim();
   if (!text) { showToast('请输入文本'); return; }
-  translateAndDisplay(text, document.getElementById('sourceLang').value);
+  let lang = document.getElementById('sourceLang').value;
+  if (lang === 'auto') {
+    lang = detectLanguage(text);
+    showToast('自动识别: ' + (lang === 'zh' ? '中文 → 英文' : 'English → 中文'));
+  }
+  translateAndDisplay(text, lang);
 }
 
 function splitSentences(text) {
