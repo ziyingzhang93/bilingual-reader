@@ -149,6 +149,36 @@
   .status-dot.online { background: #10B981; }
   .status-dot.offline { background: #EF4444; }
 
+  /* Book items */
+  .book-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    transition: all 0.2s;
+    cursor: pointer;
+  }
+  .book-item:hover { border-color: var(--primary-light); background: var(--primary-bg); }
+  .book-info { flex: 1; }
+  .book-title { font-weight: 600; font-size: 15px; }
+  .book-meta { font-size: 12px; color: var(--text-light); margin-top: 2px; }
+  .book-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .book-actions button { padding: 6px 10px; font-size: 12px; }
+
+  .url-input {
+    width: 100%;
+    padding: 10px 14px;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    transition: border-color 0.2s;
+  }
+  .url-input:focus { outline: none; border-color: var(--primary-light); }
+
   @media (max-width: 600px) {
     .header h1 { font-size: 22px; }
     .container { padding: 16px 10px; }
@@ -173,6 +203,7 @@
   <div class="tabs">
     <button class="tab active" onclick="switchTab('paste')">📝 粘贴文本</button>
     <button class="tab" onclick="switchTab('file')">📄 上传文件</button>
+    <button class="tab" onclick="switchTab('library')">📚 我的书库</button>
     <button class="tab" onclick="switchTab('demo')">⭐ 演示</button>
   </div>
 
@@ -210,6 +241,49 @@
     </div>
     <div class="action-row">
       <button class="btn btn-primary" onclick="processFile()">🚀 开始翻译并阅读</button>
+    </div>
+  </div>
+
+  <!-- Library -->
+  <div class="input-panel" id="panel-library">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <label style="margin:0;">📚 我的书库 My Library</label>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <span style="font-size:12px; color:var(--text-light);" id="userIdDisplay"></span>
+        <button class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="copyUserId()">复制阅读码</button>
+      </div>
+    </div>
+    <div style="background:#FFFBEB; border:1px solid #FDE68A; border-radius:6px; padding:10px 12px; font-size:12px; color:#92400E; margin-bottom:14px; line-height:1.5;">
+      你的<strong>阅读码</strong>是你的书库钥匙。首次使用会自动生成，请复制保存好。换设备时输入阅读码即可找回你的书库。书籍内容仅供在线阅读，无法下载。
+    </div>
+    <!-- Login/restore -->
+    <div id="libraryLogin" style="display:none; margin-bottom:14px;">
+      <label style="font-size:13px;">输入已有的阅读码：</label>
+      <div style="display:flex; gap:8px; margin-top:6px;">
+        <input type="text" class="url-input" id="restoreIdInput" placeholder="例如: a1b2c3d4" style="flex:1;">
+        <button class="btn btn-primary" style="padding:8px 16px; font-size:13px;" onclick="restoreUser()">恢复书库</button>
+      </div>
+    </div>
+    <!-- Upload new book -->
+    <div style="border:2px dashed var(--border); border-radius:8px; padding:16px; margin-bottom:14px; background:var(--bg);">
+      <label style="font-size:13px; margin-bottom:8px;">上传新书到书库</label>
+      <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+        <input type="text" class="url-input" id="bookTitle" placeholder="书名 Book title" style="flex:1; min-width:150px;">
+        <select class="lang-select" id="bookLang">
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+      <textarea id="bookContent" placeholder="粘贴书籍内容到这里...&#10;或点击下方按钮上传 .txt 文件" style="min-height:100px; margin-bottom:8px;"></textarea>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn btn-secondary" style="padding:8px 14px; font-size:13px;" onclick="document.getElementById('bookFileInput').click()">📄 从文件导入</button>
+        <input type="file" id="bookFileInput" accept=".txt" style="display:none;" onchange="loadBookFile(this)">
+        <button class="btn btn-primary" style="padding:8px 14px; font-size:13px;" onclick="saveBook()">📥 保存到书库</button>
+      </div>
+    </div>
+    <!-- Book list -->
+    <div id="bookList">
+      <p style="color:var(--text-light); font-size:14px; text-align:center; padding:20px;">书库为空，请上传你的第一本书</p>
     </div>
   </div>
 
@@ -307,9 +381,10 @@ const API_BASE = window.location.origin;
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.input-panel').forEach(p => p.classList.remove('active'));
-  const panels = { paste: 0, file: 1, demo: 2 };
+  const panels = { paste: 0, file: 1, library: 2, demo: 3 };
   document.querySelectorAll('.tab')[panels[name]].classList.add('active');
   document.getElementById('panel-' + name).classList.add('active');
+  if (name === 'library') { initLibrary(); loadBookList(); }
 }
 
 // ============ Demos ============
@@ -591,6 +666,167 @@ function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// ============ 用户书库 Library ============
+let userId = localStorage.getItem('bilingual_reader_uid') || '';
+
+async function initLibrary() {
+  if (userId) {
+    document.getElementById('userIdDisplay').textContent = '阅读码: ' + userId;
+    document.getElementById('libraryLogin').style.display = 'none';
+  } else {
+    // 自动创建新用户
+    try {
+      const r = await fetch(`${API_BASE}/user/create`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({})
+      });
+      const d = await r.json();
+      if (d.success) {
+        userId = d.user_id;
+        localStorage.setItem('bilingual_reader_uid', userId);
+        document.getElementById('userIdDisplay').textContent = '阅读码: ' + userId;
+        document.getElementById('libraryLogin').style.display = 'none';
+        showToast('已生成你的阅读码: ' + userId + '，请复制保存！');
+      }
+    } catch(e) {
+      document.getElementById('libraryLogin').style.display = 'block';
+    }
+  }
+}
+
+function copyUserId() {
+  if (userId) {
+    navigator.clipboard.writeText(userId).then(() => showToast('阅读码已复制: ' + userId));
+  }
+}
+
+function restoreUser() {
+  const id = document.getElementById('restoreIdInput').value.trim();
+  if (!id) { showToast('请输入阅读码'); return; }
+  userId = id;
+  localStorage.setItem('bilingual_reader_uid', userId);
+  document.getElementById('userIdDisplay').textContent = '阅读码: ' + userId;
+  document.getElementById('libraryLogin').style.display = 'none';
+  loadBookList();
+  showToast('书库已恢复！');
+}
+
+function loadBookFile(input) {
+  if (!input.files[0]) return;
+  const file = input.files[0];
+  document.getElementById('bookTitle').value = file.name.replace(/\.txt$/i, '');
+  const reader = new FileReader();
+  reader.onload = e => { document.getElementById('bookContent').value = e.target.result; };
+  reader.readAsText(file);
+}
+
+async function saveBook() {
+  const title = document.getElementById('bookTitle').value.trim();
+  const content = document.getElementById('bookContent').value.trim();
+  const lang = document.getElementById('bookLang').value;
+  if (!title) { showToast('请输入书名'); return; }
+  if (!content) { showToast('请输入书籍内容'); return; }
+  if (!userId) { await initLibrary(); }
+
+  try {
+    const r = await fetch(`${API_BASE}/books/save`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ user_id: userId, title, content, lang })
+    });
+    const d = await r.json();
+    if (d.success) {
+      showToast('书籍已保存到书库！');
+      document.getElementById('bookTitle').value = '';
+      document.getElementById('bookContent').value = '';
+      loadBookList();
+    } else {
+      showToast('保存失败: ' + d.error);
+    }
+  } catch(e) { showToast('服务器连接失败'); }
+}
+
+async function loadBookList() {
+  if (!userId) return;
+  try {
+    const r = await fetch(`${API_BASE}/books/list`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ user_id: userId })
+    });
+    const d = await r.json();
+    const list = document.getElementById('bookList');
+    if (d.success && d.books.length > 0) {
+      list.innerHTML = d.books.map(b => `
+        <div class="book-item" onclick="readBook('${b.id}')">
+          <div class="book-info">
+            <div class="book-title">${escapeHtml(b.title)}</div>
+            <div class="book-meta">${b.lang === 'zh' ? '中文' : 'English'} · ${b.sentence_count} 句 · ${b.created}</div>
+          </div>
+          <div class="book-actions">
+            <button class="btn btn-primary" onclick="event.stopPropagation(); readBook('${b.id}')">📖 阅读</button>
+            <button class="btn btn-secondary" onclick="event.stopPropagation(); deleteBook('${b.id}', '${escapeHtml(b.title)}')">🗑️</button>
+          </div>
+        </div>
+      `).join('');
+    } else {
+      list.innerHTML = '<p style="color:var(--text-light); font-size:14px; text-align:center; padding:20px;">书库为空，请上传你的第一本书</p>';
+    }
+  } catch(e) { console.error(e); }
+}
+
+async function readBook(bookId) {
+  if (!userId) return;
+  document.querySelectorAll('.input-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector('.tabs').style.display = 'none';
+  document.getElementById('loading').classList.add('active');
+  document.getElementById('loadingText').textContent = '正在加载书籍并翻译...';
+
+  try {
+    const r = await fetch(`${API_BASE}/books/read`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ user_id: userId, book_id: bookId })
+    });
+    const d = await r.json();
+    if (d.success && d.book) {
+      const book = d.book;
+      const text = book.sentences.join('\n');
+      const sourceLang = book.lang || 'zh';
+      const target = sourceLang === 'zh' ? 'en' : 'zh';
+
+      // 批量翻译
+      const tr = await fetch(`${API_BASE}/translate_batch`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ text, source: sourceLang, target })
+      });
+      const td = await tr.json();
+      if (td.success && td.pairs) {
+        sentences = td.pairs;
+        document.getElementById('loading').classList.remove('active');
+        renderReader();
+      } else {
+        throw new Error(td.error || '翻译失败');
+      }
+    } else {
+      throw new Error(d.error || '加载失败');
+    }
+  } catch(e) {
+    document.getElementById('loading').classList.remove('active');
+    showToast('加载失败: ' + e.message);
+    backToInput();
+  }
+}
+
+async function deleteBook(bookId, title) {
+  if (!confirm('确定要删除《' + title + '》吗？')) return;
+  try {
+    const r = await fetch(`${API_BASE}/books/delete`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ user_id: userId, book_id: bookId })
+    });
+    const d = await r.json();
+    if (d.success) { showToast('已删除'); loadBookList(); }
+  } catch(e) { showToast('删除失败'); }
 }
 
 // ============ Server check ============

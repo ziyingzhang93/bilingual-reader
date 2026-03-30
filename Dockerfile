@@ -8,6 +8,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY server.py .
 COPY index.html .
 
+RUN mkdir -p /app/user_books
+
 EXPOSE 8765
 
 CMD ["python", "server.py"]
