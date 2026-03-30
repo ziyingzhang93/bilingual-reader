@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>双语逐句阅读器 | Bilingual Sentence Reader</title>
+<style>
+  :root {
+    --primary: #4F46E5;
+    --primary-light: #818CF8;
+    --primary-bg: #EEF2FF;
+    --accent: #F59E0B;
+    --text: #1E293B;
+    --text-light: #64748B;
+    --bg: #F8FAFC;
+    --card: #FFFFFF;
+    --border: #E2E8F0;
+    --success: #10B981;
+    --zh-color: #1E293B;
+    --en-color: #4F46E5;
+    --highlight-zh: #FEF3C7;
+    --highlight-en: #EEF2FF;
+    --radius: 12px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6; min-height: 100vh;
+  }
+
+  .header {
+    background: linear-gradient(135deg, var(--primary), #7C3AED);
+    color: white; padding: 24px 0; text-align: center;
+    box-shadow: 0 4px 20px rgba(79,70,229,0.3);
+  }
+  .header h1 { font-size: 28px; font-weight: 700; }
+  .header p { font-size: 14px; opacity: 0.85; margin-top: 6px; }
+  .header .badge { display: inline-block; background: rgba(255,255,255,0.2); padding: 3px 10px; border-radius: 12px; font-size: 11px; margin-top: 8px; }
+
+  .container { max-width: 900px; margin: 0 auto; padding: 24px 16px; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 8px; margin-bottom: 20px; background: var(--card); border-radius: var(--radius); padding: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .tab { flex: 1; padding: 10px 16px; border: none; background: transparent; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; color: var(--text-light); transition: all 0.2s; }
+  .tab.active { background: var(--primary); color: white; box-shadow: 0 2px 8px rgba(79,70,229,0.3); }
+  .tab:hover:not(.active) { background: var(--primary-bg); color: var(--primary); }
+
+  /* Panels */
+  .input-panel { display: none; background: var(--card); border-radius: var(--radius); padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 20px; }
+  .input-panel.active { display: block; }
+  .input-panel label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 14px; }
+
+  textarea { width: 100%; min-height: 180px; border: 2px solid var(--border); border-radius: 8px; padding: 14px; font-size: 15px; line-height: 1.7; resize: vertical; font-family: inherit; transition: border-color 0.2s; }
+  textarea:focus { outline: none; border-color: var(--primary-light); }
+  textarea::placeholder { color: #CBD5E1; }
+
+  .lang-row { display: flex; align-items: center; gap: 12px; margin: 16px 0; flex-wrap: wrap; }
+  .lang-row label { margin-bottom: 0; font-size: 14px; }
+  .lang-select { padding: 8px 14px; border: 2px solid var(--border); border-radius: 8px; font-size: 14px; background: white; cursor: pointer; }
+  .lang-select:focus { outline: none; border-color: var(--primary-light); }
+
+  /* File drop */
+  .file-drop { border: 2px dashed var(--border); border-radius: 8px; padding: 40px 20px; text-align: center; cursor: pointer; transition: all 0.2s; background: var(--bg); }
+  .file-drop:hover, .file-drop.dragover { border-color: var(--primary); background: var(--primary-bg); }
+  .file-drop .icon { font-size: 40px; margin-bottom: 10px; }
+  .file-drop p { color: var(--text-light); font-size: 14px; }
+  .file-drop .filename { color: var(--primary); font-weight: 600; margin-top: 8px; }
+  .file-input { display: none; }
+
+  /* Buttons */
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 28px; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s; font-family: inherit; }
+  .btn-primary { background: linear-gradient(135deg, var(--primary), #7C3AED); color: white; box-shadow: 0 2px 10px rgba(79,70,229,0.3); }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(79,70,229,0.4); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  .btn-secondary { background: var(--bg); color: var(--text); border: 2px solid var(--border); }
+  .btn-secondary:hover { border-color: var(--primary-light); color: var(--primary); }
+
+  .btn-icon { width: 40px; height: 40px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; border: 2px solid var(--border); background: white; cursor: pointer; font-size: 18px; transition: all 0.2s; }
+  .btn-icon:hover { border-color: var(--primary); background: var(--primary-bg); }
+  .btn-icon.active { background: var(--primary); color: white; border-color: var(--primary); }
+
+  .action-row { display: flex; gap: 12px; margin-top: 16px; align-items: center; flex-wrap: wrap; }
+
+  /* Loading */
+  .loading { display: none; text-align: center; padding: 40px; }
+  .loading.active { display: block; }
+  .spinner { width: 40px; height: 40px; border: 4px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading p { color: var(--text-light); font-size: 14px; }
+
+  /* Reader */
+  .reader-section { display: none; margin-top: 20px; }
+  .reader-section.active { display: block; }
+
+  .controls-bar { background: var(--card); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .controls-bar .label { font-size: 13px; color: var(--text-light); font-weight: 500; }
+  .speed-control { display: flex; align-items: center; gap: 6px; }
+  .speed-control input[type="range"] { width: 80px; accent-color: var(--primary); }
+  .speed-val { font-size: 13px; color: var(--primary); font-weight: 600; min-width: 32px; }
+  .divider { width: 1px; height: 24px; background: var(--border); }
+
+  /* Voice panel */
+  .voice-panel { display: none; background: var(--card); border-radius: var(--radius); margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: hidden; }
+  .voice-panel.active { display: block; }
+  .voice-panel-inner { padding: 20px; }
+  .voice-tip { font-size: 12px; color: #92400E; background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 6px; padding: 10px 12px; margin-bottom: 14px; line-height: 1.5; }
+  .voice-row { display: flex; gap: 16px; }
+  .voice-col { flex: 1; }
+  .voice-col label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+
+  /* Sentences */
+  .sentence-list { display: flex; flex-direction: column; gap: 4px; }
+  .sentence-pair { background: var(--card); border-radius: var(--radius); overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: all 0.3s; border-left: 4px solid transparent; }
+  .sentence-pair:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+  .sentence-pair.playing { border-left-color: var(--accent); box-shadow: 0 2px 12px rgba(245,158,11,0.2); }
+
+  .sentence-row { display: flex; align-items: flex-start; padding: 14px 16px; gap: 12px; transition: background-color 0.3s; cursor: pointer; }
+  .sentence-row:first-child { border-bottom: 1px solid var(--border); }
+  .sentence-row:hover { background: rgba(0,0,0,0.015); }
+  .sentence-row.highlight-zh { background: var(--highlight-zh); }
+  .sentence-row.highlight-en { background: var(--highlight-en); }
+
+  .sentence-num { min-width: 28px; height: 28px; background: var(--bg); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: var(--text-light); flex-shrink: 0; margin-top: 2px; }
+  .lang-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; flex-shrink: 0; margin-top: 3px; }
+  .lang-badge.zh { background: #FEF3C7; color: #92400E; }
+  .lang-badge.en { background: #EEF2FF; color: #4338CA; }
+
+  .sentence-text { flex: 1; font-size: 16px; line-height: 1.7; }
+  .sentence-text.zh { color: var(--zh-color); font-weight: 500; }
+  .sentence-text.en { color: var(--en-color); }
+
+  .play-btn-small { flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%; border: none; background: var(--bg); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; transition: all 0.2s; margin-top: 2px; }
+  .play-btn-small:hover { background: var(--primary-bg); }
+
+  /* Progress */
+  .progress-bar { width: 100%; height: 4px; background: var(--border); border-radius: 2px; margin-bottom: 16px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent)); border-radius: 2px; width: 0%; transition: width 0.3s; }
+
+  .stats { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+  .stat-card { flex: 1; min-width: 120px; background: var(--card); border-radius: var(--radius); padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); text-align: center; }
+  .stat-card .num { font-size: 24px; font-weight: 700; color: var(--primary); }
+  .stat-card .label { font-size: 12px; color: var(--text-light); margin-top: 2px; }
+
+  .toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(100px); background: #1E293B; color: white; padding: 12px 24px; border-radius: 8px; font-size: 14px; z-index: 1000; transition: transform 0.3s ease; box-shadow: 0 4px 20px rgba(0,0,0,0.2); }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+
+  /* Status indicator */
+  .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .status-dot.online { background: #10B981; }
+  .status-dot.offline { background: #EF4444; }
+
+  @media (max-width: 600px) {
+    .header h1 { font-size: 22px; }
+    .container { padding: 16px 10px; }
+    .controls-bar { padding: 12px; }
+    .sentence-text { font-size: 15px; }
+    .tabs { flex-wrap: wrap; }
+    .voice-row { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>📖 双语逐句阅读器</h1>
+  <p>Bilingual Sentence-by-Sentence Reader — 先中文，再英文，逐句精读</p>
+  <div class="badge"><span class="status-dot online" id="statusDot"></span><span id="statusText">Edge TTS 自然人声</span></div>
+</div>
+
+<div class="container">
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('paste')">📝 粘贴文本</button>
+    <button class="tab" onclick="switchTab('file')">📄 上传文件</button>
+    <button class="tab" onclick="switchTab('demo')">⭐ 演示</button>
+  </div>
+
+  <!-- Paste -->
+  <div class="input-panel active" id="panel-paste">
+    <label>输入文本 Input Text</label>
+    <textarea id="textInput" placeholder="在此粘贴中文或英文文本...&#10;Paste Chinese or English text here...&#10;&#10;例如：今天天气很好。我想去公园散步。花园里的花开了。"></textarea>
+    <div class="lang-row">
+      <label>输入语言：</label>
+      <select class="lang-select" id="sourceLang">
+        <option value="zh">中文 → 翻译成英文</option>
+        <option value="en">English → 翻译成中文</option>
+      </select>
+    </div>
+    <div class="action-row">
+      <button class="btn btn-primary" onclick="processText()">🚀 开始翻译并阅读</button>
+    </div>
+  </div>
+
+  <!-- File -->
+  <div class="input-panel" id="panel-file">
+    <label>上传文件 Upload File</label>
+    <div class="file-drop" id="fileDrop" onclick="document.getElementById('fileInput').click()">
+      <div class="icon">📁</div>
+      <p>点击选择或拖拽 .txt 文件到此处</p>
+      <div class="filename" id="fileName"></div>
+    </div>
+    <input type="file" class="file-input" id="fileInput" accept=".txt" onchange="handleFile(this)">
+    <div class="lang-row">
+      <label>文件语言：</label>
+      <select class="lang-select" id="fileLang">
+        <option value="zh">中文 → 翻译成英文</option>
+        <option value="en">English → 翻译成中文</option>
+      </select>
+    </div>
+    <div class="action-row">
+      <button class="btn btn-primary" onclick="processFile()">🚀 开始翻译并阅读</button>
+    </div>
+  </div>
+
+  <!-- Demo -->
+  <div class="input-panel" id="panel-demo">
+    <label>选择演示内容 Choose Demo Content</label>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+      <button class="btn btn-secondary" onclick="loadDemo('news')">📰 新闻</button>
+      <button class="btn btn-secondary" onclick="loadDemo('story')">📚 故事</button>
+      <button class="btn btn-secondary" onclick="loadDemo('tech')">💻 科技</button>
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div class="loading" id="loading">
+    <div class="spinner"></div>
+    <p id="loadingText">正在翻译中... Translating...</p>
+  </div>
+
+  <!-- Reader -->
+  <div class="reader-section" id="readerSection">
+    <div class="stats">
+      <div class="stat-card"><div class="num" id="statSentences">0</div><div class="label">句子 Sentences</div></div>
+      <div class="stat-card"><div class="num" id="statWords">0</div><div class="label">词数 Words</div></div>
+      <div class="stat-card"><div class="num" id="statProgress">0%</div><div class="label">进度 Progress</div></div>
+    </div>
+
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+
+    <div class="controls-bar">
+      <button class="btn-icon" id="btnPlayAll" onclick="togglePlayAll()" title="连续播放">▶️</button>
+      <button class="btn-icon" onclick="stopAll()" title="停止">⏹️</button>
+      <button class="btn-icon" onclick="playPrev()" title="上一句">⏮️</button>
+      <button class="btn-icon" onclick="playNext()" title="下一句">⏭️</button>
+      <div class="divider"></div>
+      <div class="speed-control">
+        <span class="label">间隔</span>
+        <input type="range" id="gapRange" min="0" max="3" step="0.5" value="1" oninput="gapSeconds=parseFloat(this.value); document.getElementById('gapVal').textContent=this.value+'s'">
+        <span class="speed-val" id="gapVal">1s</span>
+      </div>
+      <div class="divider"></div>
+      <button class="btn btn-secondary" style="padding:8px 14px; font-size:13px;" onclick="toggleVoicePanel()">🎙️ 语音</button>
+      <button class="btn btn-secondary" style="padding:8px 14px; font-size:13px;" onclick="backToInput()">← 返回</button>
+    </div>
+
+    <!-- Voice Settings -->
+    <div class="voice-panel" id="voicePanel">
+      <div class="voice-panel-inner">
+        <h3 style="font-size:15px; margin-bottom:12px;">🎙️ 语音设置 Voice Settings</h3>
+        <p class="voice-tip">使用 Edge TTS 微软自然人声引擎。推荐：中文用"晓晓"，英文用"Jenny"，听起来最接近真人。</p>
+        <div class="voice-row">
+          <div class="voice-col">
+            <label>中文语音 Chinese Voice</label>
+            <select class="lang-select" id="voiceZh" style="width:100%;">
+              <option value="zh-CN-XiaoxiaoNeural">⭐ 晓晓 Xiaoxiao (女声，推荐)</option>
+              <option value="zh-CN-XiaoyiNeural">晓伊 Xiaoyi (女声)</option>
+              <option value="zh-CN-YunxiNeural">云希 Yunxi (男声)</option>
+              <option value="zh-CN-YunjianNeural">云健 Yunjian (男声)</option>
+            </select>
+            <button class="btn btn-secondary" style="padding:6px 12px; font-size:12px; margin-top:6px;" onclick="testVoice('zh')">🔊 试听</button>
+          </div>
+          <div class="voice-col">
+            <label>英文语音 English Voice</label>
+            <select class="lang-select" id="voiceEn" style="width:100%;">
+              <option value="en-US-JennyNeural">⭐ Jenny (女声，推荐)</option>
+              <option value="en-US-AriaNeural">Aria (女声)</option>
+              <option value="en-US-GuyNeural">Guy (男声)</option>
+              <option value="en-US-ChristopherNeural">Christopher (男声)</option>
+            </select>
+            <button class="btn btn-secondary" style="padding:6px 12px; font-size:12px; margin-top:6px;" onclick="testVoice('en')">🔊 试听</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sentence-list" id="sentenceList"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ============ State ============
+let sentences = [];
+let currentIndex = -1;
+let isPlaying = false;
+let gapSeconds = 1;
+let fileContent = '';
+let stopRequested = false;
+let currentAudio = null;
+
+const API_BASE = window.location.origin;
+
+// ============ Tab switching ============
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.input-panel').forEach(p => p.classList.remove('active'));
+  const panels = { paste: 0, file: 1, demo: 2 };
+  document.querySelectorAll('.tab')[panels[name]].classList.add('active');
+  document.getElementById('panel-' + name).classList.add('active');
+}
+
+// ============ Demos ============
+const demos = {
+  news: { lang: 'zh', text: '人工智能正在深刻改变我们的生活方式。从智能手机上的语音助手到自动驾驶汽车，AI技术已经渗透到日常生活的方方面面。专家预测，到2030年，人工智能将为全球经济贡献超过15万亿美元的价值。然而，这项技术也带来了一些挑战，包括就业结构的变化和数据隐私的担忧。如何在享受AI带来便利的同时，妥善应对这些挑战，是当前社会面临的重要课题。' },
+  story: { lang: 'zh', text: '从前有一个小女孩，她住在山脚下的一个小村庄里。每天早上，她都会爬到山顶看日出。有一天，她在山顶发现了一朵从未见过的花。这朵花散发着淡淡的光芒，像是星星落在了地上。她小心翼翼地把花带回了家，放在窗台上。从那以后，每个夜晚，那朵花都会发出温柔的光，照亮整个房间。' },
+  tech: { lang: 'zh', text: '量子计算是下一代计算技术的核心方向。与传统计算机使用比特不同，量子计算机使用量子比特，可以同时处于多个状态。这使得量子计算机在处理某些复杂问题时具有巨大优势。目前，谷歌、IBM和微软等科技巨头都在积极研发量子计算技术。虽然实用化的量子计算机还需要时间，但它的潜力已经在密码学、药物研发和材料科学等领域展现出来。' }
+};
+
+function loadDemo(key) {
+  document.getElementById('textInput').value = demos[key].text;
+  document.getElementById('sourceLang').value = demos[key].lang;
+  switchTab('paste');
+  showToast('已加载演示内容，点击"开始翻译并阅读"');
+}
+
+// ============ File handling ============
+const fileDrop = document.getElementById('fileDrop');
+fileDrop.addEventListener('dragover', e => { e.preventDefault(); fileDrop.classList.add('dragover'); });
+fileDrop.addEventListener('dragleave', () => fileDrop.classList.remove('dragover'));
+fileDrop.addEventListener('drop', e => {
+  e.preventDefault(); fileDrop.classList.remove('dragover');
+  if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]);
+});
+function handleFile(input) { if (input.files[0]) readFile(input.files[0]); }
+function readFile(file) {
+  document.getElementById('fileName').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = e => { fileContent = e.target.result; };
+  reader.readAsText(file);
+}
+function processFile() {
+  if (!fileContent) { showToast('请先选择文件'); return; }
+  translateAndDisplay(fileContent, document.getElementById('fileLang').value);
+}
+
+// ============ Process text ============
+function processText() {
+  const text = document.getElementById('textInput').value.trim();
+  if (!text) { showToast('请输入文本'); return; }
+  translateAndDisplay(text, document.getElementById('sourceLang').value);
+}
+
+function splitSentences(text) {
+  return text.replace(/\r\n/g, '\n').split(/(?<=[。！？.!?\n])\s*/).map(s => s.trim()).filter(s => s.length > 0);
+}
+
+// ============ Translation via backend (批量模式) ============
+async function translateAndDisplay(text, sourceLang) {
+  if (!text.trim()) { showToast('请输入文本'); return; }
+
+  document.querySelectorAll('.input-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector('.tabs').style.display = 'none';
+  document.getElementById('loading').classList.add('active');
+  document.getElementById('loadingText').textContent = '正在批量翻译中... Translating...';
+
+  try {
+    const target = sourceLang === 'zh' ? 'en' : 'zh';
+    const resp = await fetch(`${API_BASE}/translate_batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, source: sourceLang, target })
+    });
+    const data = await resp.json();
+
+    if (data.success && data.pairs) {
+      sentences = data.pairs;
+      document.getElementById('loading').classList.remove('active');
+      renderReader();
+    } else {
+      document.getElementById('loading').classList.remove('active');
+      showToast('翻译失败: ' + (data.error || '未知错误'));
+      backToInput();
+    }
+  } catch (e) {
+    console.error('Translation error:', e);
+    document.getElementById('loading').classList.remove('active');
+    showToast('服务器连接失败，请确认 server.py 正在运行');
+    backToInput();
+  }
+}
+
+// ============ TTS via backend (Edge TTS) ============
+const audioCache = {};
+
+async function getAudioUrl(text, voice) {
+  const cacheKey = `${text}:${voice}`;
+  if (audioCache[cacheKey]) return audioCache[cacheKey];
+
+  try {
+    const resp = await fetch(`${API_BASE}/tts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voice })
+    });
+    const data = await resp.json();
+    if (data.success) {
+      audioCache[cacheKey] = data.audio_url;
+      return data.audio_url;
+    }
+  } catch (e) {
+    console.error('TTS error:', e);
+  }
+  return null;
+}
+
+function preloadAudio(index) {
+  if (index >= sentences.length) return;
+  const s = sentences[index];
+  const zhVoice = document.getElementById('voiceZh').value;
+  const enVoice = document.getElementById('voiceEn').value;
+  // Fire and forget - preload in background
+  getAudioUrl(s.zh, zhVoice);
+  getAudioUrl(s.en, enVoice);
+}
+
+async function playAudio(text, voice) {
+  return new Promise(async (resolve) => {
+    const url = await getAudioUrl(text, voice);
+    if (!url) { resolve(); return; }
+
+    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+
+    const audio = new Audio(url);
+    currentAudio = audio;
+    audio.onended = () => { currentAudio = null; resolve(); };
+    audio.onerror = () => { currentAudio = null; resolve(); };
+
+    try {
+      await audio.play();
+    } catch (e) {
+      currentAudio = null;
+      resolve();
+    }
+  });
+}
+
+function testVoice(lang) {
+  const text = lang === 'zh' ? '你好，欢迎使用双语阅读器，这是中文语音测试。' : 'Hello, welcome to the bilingual reader. This is an English voice test.';
+  const voice = lang === 'zh' ? document.getElementById('voiceZh').value : document.getElementById('voiceEn').value;
+  playAudio(text, voice);
+}
+
+function toggleVoicePanel() {
+  document.getElementById('voicePanel').classList.toggle('active');
+}
+
+// ============ Render reader ============
+function renderReader() {
+  const list = document.getElementById('sentenceList');
+  list.innerHTML = '';
+  sentences.forEach((s, i) => {
+    const pair = document.createElement('div');
+    pair.className = 'sentence-pair'; pair.id = 'pair-' + i;
+    pair.innerHTML = `
+      <div class="sentence-row" id="row-zh-${i}" onclick="playSingle(${i},'zh')">
+        <div class="sentence-num">${i+1}</div>
+        <span class="lang-badge zh">中</span>
+        <div class="sentence-text zh">${escapeHtml(s.zh)}</div>
+        <button class="play-btn-small" onclick="event.stopPropagation();playSingle(${i},'zh')" title="朗读中文">🔊</button>
+      </div>
+      <div class="sentence-row" id="row-en-${i}" onclick="playSingle(${i},'en')">
+        <div class="sentence-num">${i+1}</div>
+        <span class="lang-badge en">EN</span>
+        <div class="sentence-text en">${escapeHtml(s.en)}</div>
+        <button class="play-btn-small" onclick="event.stopPropagation();playSingle(${i},'en')" title="朗读英文">🔊</button>
+      </div>`;
+    list.appendChild(pair);
+  });
+
+  document.getElementById('statSentences').textContent = sentences.length;
+  document.getElementById('statWords').textContent = sentences.reduce((s, x) => s + x.en.split(/\s+/).length, 0);
+  document.getElementById('readerSection').classList.add('active');
+  currentIndex = -1;
+  updateProgress();
+
+  // Preload next few sentences
+  for (let i = 0; i < Math.min(3, sentences.length); i++) preloadAudio(i);
+}
+
+// ============ Playback ============
+function clearHighlights() {
+  document.querySelectorAll('.sentence-row').forEach(r => r.classList.remove('highlight-zh', 'highlight-en'));
+  document.querySelectorAll('.sentence-pair').forEach(p => p.classList.remove('playing'));
+}
+
+function highlightSentence(index, lang) {
+  clearHighlights();
+  const pair = document.getElementById('pair-' + index);
+  const row = document.getElementById(`row-${lang}-${index}`);
+  if (pair) { pair.classList.add('playing'); pair.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  if (row) row.classList.add('highlight-' + lang);
+}
+
+async function playSingle(index, lang) {
+  const voice = lang === 'zh' ? document.getElementById('voiceZh').value : document.getElementById('voiceEn').value;
+  const text = lang === 'zh' ? sentences[index].zh : sentences[index].en;
+  highlightSentence(index, lang);
+  await playAudio(text, voice);
+  clearHighlights();
+}
+
+async function playPair(index) {
+  if (index < 0 || index >= sentences.length) return;
+  currentIndex = index;
+  updateProgress();
+
+  const zhVoice = document.getElementById('voiceZh').value;
+  const enVoice = document.getElementById('voiceEn').value;
+
+  // Preload next pair
+  if (index + 1 < sentences.length) preloadAudio(index + 1);
+
+  // Chinese
+  highlightSentence(index, 'zh');
+  await playAudio(sentences[index].zh, zhVoice);
+  if (stopRequested) return;
+
+  await sleep(gapSeconds * 1000);
+  if (stopRequested) return;
+
+  // English
+  highlightSentence(index, 'en');
+  await playAudio(sentences[index].en, enVoice);
+  if (stopRequested) return;
+
+  await sleep(gapSeconds * 500);
+}
+
+async function togglePlayAll() {
+  if (isPlaying) { stopAll(); return; }
+  isPlaying = true; stopRequested = false;
+  document.getElementById('btnPlayAll').textContent = '⏸️';
+  document.getElementById('btnPlayAll').classList.add('active');
+  const startFrom = currentIndex < 0 ? 0 : currentIndex;
+  for (let i = startFrom; i < sentences.length; i++) {
+    if (stopRequested) break;
+    await playPair(i);
+  }
+  stopAll();
+}
+
+function stopAll() {
+  isPlaying = false; stopRequested = true;
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  document.getElementById('btnPlayAll').textContent = '▶️';
+  document.getElementById('btnPlayAll').classList.remove('active');
+  clearHighlights();
+}
+
+function playNext() {
+  stopAll(); stopRequested = false;
+  playPair(Math.min((currentIndex < 0 ? 0 : currentIndex + 1), sentences.length - 1));
+}
+function playPrev() {
+  stopAll(); stopRequested = false;
+  playPair(Math.max((currentIndex <= 0 ? 0 : currentIndex - 1), 0));
+}
+
+// ============ Progress ============
+function updateProgress() {
+  const pct = sentences.length > 0 ? Math.round(((currentIndex + 1) / sentences.length) * 100) : 0;
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('statProgress').textContent = pct + '%';
+}
+
+// ============ Navigation ============
+function backToInput() {
+  stopAll();
+  document.getElementById('readerSection').classList.remove('active');
+  document.querySelector('.tabs').style.display = 'flex';
+  switchTab('paste');
+}
+
+// ============ Utility ============
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// ============ Server check ============
+async function checkServer() {
+  try {
+    const r = await fetch(`${API_BASE}/voices`);
+    if (r.ok) {
+      document.getElementById('statusDot').className = 'status-dot online';
+      document.getElementById('statusText').textContent = 'Edge TTS 自然人声 · 已连接';
+    }
+  } catch {
+    document.getElementById('statusDot').className = 'status-dot offline';
+    document.getElementById('statusText').textContent = '服务器未连接 · 请启动 server.py';
+  }
+}
+checkServer();
+</script>
+</body>
+</html>
