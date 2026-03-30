@@ -137,8 +137,24 @@ def translate_deepl(text, source_lang, target_lang):
         result = json.loads(resp.read())
         return result["translations"][0]["text"]
 
+def translate_google(text, source_lang, target_lang):
+    """使用 Google Translate 免费接口翻译（高额度、高质量）"""
+    lang_map = {"zh": "zh-CN", "en": "en"}
+    sl = lang_map.get(source_lang, source_lang)
+    tl = lang_map.get(target_lang, target_lang)
+    url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl={sl}&tl={tl}&dt=t&q={urllib.parse.quote(text)}"
+
+    req = urllib.request.Request(url)
+    req.add_header("User-Agent", "Mozilla/5.0")
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        result = json.loads(resp.read())
+        # 结果格式: [[["translated text","original text",...],...],...]
+        if result and result[0]:
+            return ''.join(part[0] for part in result[0] if part[0])
+    return None
+
 def translate_mymemory(text, source_lang, target_lang):
-    """使用 MyMemory 免费 API 翻译"""
+    """使用 MyMemory 免费 API 翻译（备用）"""
     lang_map = {"zh": "zh-CN", "en": "en-GB"}
     langpair = f"{lang_map.get(source_lang, source_lang)}|{lang_map.get(target_lang, target_lang)}"
     url = f"https://api.mymemory.translated.net/get?q={urllib.parse.quote(text)}&langpair={langpair}"
@@ -151,14 +167,27 @@ def translate_mymemory(text, source_lang, target_lang):
         return None
 
 def translate(text, source_lang, target_lang):
-    """翻译文本，优先使用 DeepL"""
-    try:
-        if DEEPL_API_KEY:
+    """翻译文本：DeepL > Google > MyMemory"""
+    # 1. DeepL（如果有 API Key）
+    if DEEPL_API_KEY:
+        try:
             return translate_deepl(text, source_lang, target_lang)
-        else:
-            return translate_mymemory(text, source_lang, target_lang)
+        except Exception as e:
+            print(f"  ⚠️ DeepL 翻译失败: {e}")
+
+    # 2. Google Translate（免费、高额度）
+    try:
+        result = translate_google(text, source_lang, target_lang)
+        if result:
+            return result
     except Exception as e:
-        print(f"  ❌ 翻译出错: {e}")
+        print(f"  ⚠️ Google 翻译失败: {e}")
+
+    # 3. MyMemory（最后备用）
+    try:
+        return translate_mymemory(text, source_lang, target_lang)
+    except Exception as e:
+        print(f"  ❌ MyMemory 翻译也失败: {e}")
         return None
 
 # ============ 语言自动识别 ============
