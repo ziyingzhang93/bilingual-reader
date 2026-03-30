@@ -18,6 +18,8 @@ import tempfile
 import urllib.request
 import urllib.parse
 import traceback
+import base64
+import io
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -32,6 +34,30 @@ os.makedirs(AUDIO_CACHE_DIR, exist_ok=True)
 BOOKS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_books")
 os.makedirs(BOOKS_DIR, exist_ok=True)
 import uuid
+
+# ============ PDF 支持 ============
+try:
+    from PyPDF2 import PdfReader
+    PDF_AVAILABLE = True
+    print("✅ PyPDF2 已安装，支持 PDF 上传")
+except ImportError:
+    PDF_AVAILABLE = False
+    print("⚠️ PyPDF2 未安装，PDF 上传不可用。运行: pip install PyPDF2")
+
+def extract_text_from_pdf(pdf_bytes):
+    """从 PDF 文件提取文本"""
+    if not PDF_AVAILABLE:
+        raise RuntimeError("PyPDF2 未安装")
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    text_parts = []
+    for page in reader.pages:
+        page_text = page.extract_text()
+        if page_text:
+            text_parts.append(page_text.strip())
+    full_text = "\n".join(text_parts)
+    if not full_text.strip():
+        raise ValueError("PDF 文件中没有可提取的文本（可能是扫描件/图片 PDF）")
+    return full_text
 
 # Edge TTS 推荐语音
 VOICES = {
@@ -327,6 +353,8 @@ class BilingualHandler(SimpleHTTPRequestHandler):
                 self.handle_book_read(data)
             elif self.path == "/books/delete":
                 self.handle_book_delete(data)
+            elif self.path == "/extract_pdf":
+                self.handle_extract_pdf(data)
             elif self.path == "/user/create":
                 self.handle_user_create(data)
             else:
@@ -379,6 +407,24 @@ class BilingualHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             print(f"  ❌ 批量翻译错误: {e}")
             traceback.print_exc()
+            self.send_json({"success": False, "error": str(e)})
+
+    def handle_extract_pdf(self, data):
+        """从 base64 编码的 PDF 中提取文本"""
+        pdf_base64 = data.get("pdf_data", "")
+        if not pdf_base64:
+            self.send_json({"success": False, "error": "缺少 PDF 数据"})
+            return
+        if not PDF_AVAILABLE:
+            self.send_json({"success": False, "error": "服务器未安装 PyPDF2，无法处理 PDF"})
+            return
+        try:
+            pdf_bytes = base64.b64decode(pdf_base64)
+            text = extract_text_from_pdf(pdf_bytes)
+            print(f"  📄 PDF 提取成功: {len(text)} 字符")
+            self.send_json({"success": True, "text": text})
+        except Exception as e:
+            print(f"  ❌ PDF 提取失败: {e}")
             self.send_json({"success": False, "error": str(e)})
 
     def handle_user_create(self, data):

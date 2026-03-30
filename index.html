@@ -228,10 +228,10 @@
     <label>上传文件 Upload File</label>
     <div class="file-drop" id="fileDrop" onclick="document.getElementById('fileInput').click()">
       <div class="icon">📁</div>
-      <p>点击选择或拖拽 .txt 文件到此处</p>
+      <p>点击选择或拖拽 .txt / .pdf 文件到此处</p>
       <div class="filename" id="fileName"></div>
     </div>
-    <input type="file" class="file-input" id="fileInput" accept=".txt" onchange="handleFile(this)">
+    <input type="file" class="file-input" id="fileInput" accept=".txt,.pdf" onchange="handleFile(this)">
     <div class="lang-row">
       <label>文件语言：</label>
       <select class="lang-select" id="fileLang">
@@ -274,10 +274,10 @@
           <option value="en">English</option>
         </select>
       </div>
-      <textarea id="bookContent" placeholder="粘贴书籍内容到这里...&#10;或点击下方按钮上传 .txt 文件" style="min-height:100px; margin-bottom:8px;"></textarea>
+      <textarea id="bookContent" placeholder="粘贴书籍内容到这里...&#10;或点击下方按钮上传 .txt / .pdf 文件" style="min-height:100px; margin-bottom:8px;"></textarea>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn btn-secondary" style="padding:8px 14px; font-size:13px;" onclick="document.getElementById('bookFileInput').click()">📄 从文件导入</button>
-        <input type="file" id="bookFileInput" accept=".txt" style="display:none;" onchange="loadBookFile(this)">
+        <input type="file" id="bookFileInput" accept=".txt,.pdf" style="display:none;" onchange="loadBookFile(this)">
         <button class="btn btn-primary" style="padding:8px 14px; font-size:13px;" onclick="saveBook()">📥 保存到书库</button>
       </div>
     </div>
@@ -412,9 +412,37 @@ fileDrop.addEventListener('drop', e => {
 function handleFile(input) { if (input.files[0]) readFile(input.files[0]); }
 function readFile(file) {
   document.getElementById('fileName').textContent = file.name;
-  const reader = new FileReader();
-  reader.onload = e => { fileContent = e.target.result; };
-  reader.readAsText(file);
+  if (file.name.toLowerCase().endsWith('.pdf')) {
+    // PDF: 读取为 base64，发送到服务器提取文本
+    const reader = new FileReader();
+    reader.onload = async e => {
+      const base64 = e.target.result.split(',')[1];
+      document.getElementById('fileName').textContent = file.name + ' (提取文本中...)';
+      try {
+        const r = await fetch(`${API_BASE}/extract_pdf`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ pdf_data: base64 })
+        });
+        const d = await r.json();
+        if (d.success) {
+          fileContent = d.text;
+          document.getElementById('fileName').textContent = file.name + ' ✅';
+          showToast('PDF 文本提取成功！');
+        } else {
+          document.getElementById('fileName').textContent = file.name + ' ❌';
+          showToast('PDF 提取失败: ' + d.error);
+        }
+      } catch(err) {
+        document.getElementById('fileName').textContent = file.name + ' ❌';
+        showToast('PDF 提取失败: ' + err.message);
+      }
+    };
+    reader.readAsDataURL(file);
+  } else {
+    const reader = new FileReader();
+    reader.onload = e => { fileContent = e.target.result; };
+    reader.readAsText(file);
+  }
 }
 function processFile() {
   if (!fileContent) { showToast('请先选择文件'); return; }
@@ -716,10 +744,35 @@ function restoreUser() {
 function loadBookFile(input) {
   if (!input.files[0]) return;
   const file = input.files[0];
-  document.getElementById('bookTitle').value = file.name.replace(/\.txt$/i, '');
-  const reader = new FileReader();
-  reader.onload = e => { document.getElementById('bookContent').value = e.target.result; };
-  reader.readAsText(file);
+  document.getElementById('bookTitle').value = file.name.replace(/\.(txt|pdf)$/i, '');
+  if (file.name.toLowerCase().endsWith('.pdf')) {
+    // PDF: 发送到服务器提取文本
+    const reader = new FileReader();
+    reader.onload = async e => {
+      const base64 = e.target.result.split(',')[1];
+      showToast('正在提取 PDF 文本...');
+      try {
+        const r = await fetch(`${API_BASE}/extract_pdf`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ pdf_data: base64 })
+        });
+        const d = await r.json();
+        if (d.success) {
+          document.getElementById('bookContent').value = d.text;
+          showToast('PDF 文本提取成功！');
+        } else {
+          showToast('PDF 提取失败: ' + d.error);
+        }
+      } catch(err) {
+        showToast('PDF 提取失败: ' + err.message);
+      }
+    };
+    reader.readAsDataURL(file);
+  } else {
+    const reader = new FileReader();
+    reader.onload = e => { document.getElementById('bookContent').value = e.target.result; };
+    reader.readAsText(file);
+  }
 }
 
 async function saveBook() {
