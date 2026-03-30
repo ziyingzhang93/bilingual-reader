@@ -897,14 +897,14 @@ async function readBook(bookId, chapterIndex) {
 }
 
 function renderChapterNav(book) {
-  // 在阅读区域顶部插入章节导航
+  // 在句子列表上方插入章节导航
   let nav = document.getElementById('chapterNav');
   if (!nav) {
     nav = document.createElement('div');
     nav.id = 'chapterNav';
     nav.style.cssText = 'background:var(--bg-card); border-radius:12px; padding:12px 16px; margin-bottom:16px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; box-shadow:0 1px 3px rgba(0,0,0,0.1);';
-    const reader = document.getElementById('reader');
-    reader.parentNode.insertBefore(nav, reader);
+    const sentenceList = document.getElementById('sentenceList');
+    sentenceList.parentNode.insertBefore(nav, sentenceList);
   }
 
   const cur = book.current_chapter || 0;
