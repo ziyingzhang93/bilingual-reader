@@ -410,41 +410,59 @@ fileDrop.addEventListener('drop', e => {
   if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]);
 });
 function handleFile(input) { if (input.files[0]) readFile(input.files[0]); }
+let pendingPdfForRead = null;
+
 function readFile(file) {
   document.getElementById('fileName').textContent = file.name;
   if (file.name.toLowerCase().endsWith('.pdf')) {
-    // PDF: 读取为 base64，发送到服务器提取文本
-    const reader = new FileReader();
-    reader.onload = async e => {
-      const base64 = e.target.result.split(',')[1];
-      document.getElementById('fileName').textContent = file.name + ' (提取文本中...)';
-      try {
-        const r = await fetch(`${API_BASE}/extract_pdf`, {
-          method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ pdf_data: base64 })
-        });
-        const d = await r.json();
-        if (d.success) {
-          fileContent = d.text;
-          document.getElementById('fileName').textContent = file.name + ' ✅';
-          showToast('PDF 文本提取成功！');
-        } else {
-          document.getElementById('fileName').textContent = file.name + ' ❌';
-          showToast('PDF 提取失败: ' + d.error);
-        }
-      } catch(err) {
-        document.getElementById('fileName').textContent = file.name + ' ❌';
-        showToast('PDF 提取失败: ' + err.message);
-      }
-    };
-    reader.readAsDataURL(file);
+    // PDF: 保存文件引用，点击"开始翻译"时用 FormData 直传提取
+    pendingPdfForRead = file;
+    fileContent = null;
+    document.getElementById('fileName').textContent = file.name + ` (${(file.size/1024/1024).toFixed(1)} MB) ✅ 已选择`;
+    showToast('PDF 已选择，点击"开始翻译并阅读"');
   } else {
+    pendingPdfForRead = null;
     const reader = new FileReader();
     reader.onload = e => { fileContent = e.target.result; };
     reader.readAsText(file);
   }
 }
-function processFile() {
+async function processFile() {
+  // PDF 模式：先提取文本再翻译
+  if (pendingPdfForRead) {
+    const lang = document.getElementById('fileLang').value;
+    document.getElementById('fileName').textContent = pendingPdfForRead.name + ' (提取文本中...)';
+    showToast('正在提取 PDF 文本...');
+    try {
+      const formData = new FormData();
+      formData.append('file', pendingPdfForRead);
+      formData.append('user_id', userId || 'temp');
+      formData.append('title', pendingPdfForRead.name.replace(/\.pdf$/i, ''));
+      formData.append('lang', lang);
+
+      const r = await fetch(`${API_BASE}/books/upload_pdf`, {
+        method: 'POST',
+        body: formData
+      });
+      const d = await r.json();
+      if (d.success) {
+        document.getElementById('fileName').textContent = pendingPdfForRead.name + ' ✅';
+        showToast('PDF 提取成功！正在打开阅读...');
+        pendingPdfForRead = null;
+        // 直接读取刚保存的书
+        if (d.book_id && userId) {
+          readBook(d.book_id);
+        }
+      } else {
+        document.getElementById('fileName').textContent = pendingPdfForRead.name + ' ❌';
+        showToast('PDF 处理失败: ' + d.error);
+      }
+    } catch(err) {
+      document.getElementById('fileName').textContent = pendingPdfForRead.name + ' ❌';
+      showToast('PDF 处理失败: ' + err.message);
+    }
+    return;
+  }
   if (!fileContent) { showToast('请先选择文件'); return; }
   translateAndDisplay(fileContent, document.getElementById('fileLang').value);
 }
@@ -746,34 +764,22 @@ function restoreUser() {
   showToast('书库已恢复！');
 }
 
+// 存储待上传的 PDF 文件引用
+let pendingPdfFile = null;
+
 function loadBookFile(input) {
   if (!input.files[0]) return;
   const file = input.files[0];
   document.getElementById('bookTitle').value = file.name.replace(/\.(txt|pdf)$/i, '');
   if (file.name.toLowerCase().endsWith('.pdf')) {
-    // PDF: 发送到服务器提取文本
-    const reader = new FileReader();
-    reader.onload = async e => {
-      const base64 = e.target.result.split(',')[1];
-      showToast('正在提取 PDF 文本...');
-      try {
-        const r = await fetch(`${API_BASE}/extract_pdf`, {
-          method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ pdf_data: base64 })
-        });
-        const d = await r.json();
-        if (d.success) {
-          document.getElementById('bookContent').value = d.text;
-          showToast('PDF 文本提取成功！');
-        } else {
-          showToast('PDF 提取失败: ' + d.error);
-        }
-      } catch(err) {
-        showToast('PDF 提取失败: ' + err.message);
-      }
-    };
-    reader.readAsDataURL(file);
+    // PDF: 保存文件引用，保存时直传服务器
+    pendingPdfFile = file;
+    document.getElementById('bookContent').value = '';
+    document.getElementById('bookContent').placeholder = `📄 已选择 PDF: ${file.name} (${(file.size/1024/1024).toFixed(1)} MB)\n点击"保存到书库"将自动提取文本、分章并保存`;
+    showToast(`已选择 PDF: ${file.name}`);
   } else {
+    pendingPdfFile = null;
+    document.getElementById('bookContent').placeholder = '粘贴书籍内容到这里...\n或点击下方按钮上传 .txt / .pdf 文件';
     const reader = new FileReader();
     reader.onload = e => { document.getElementById('bookContent').value = e.target.result; };
     reader.readAsText(file);
@@ -782,11 +788,45 @@ function loadBookFile(input) {
 
 async function saveBook() {
   const title = document.getElementById('bookTitle').value.trim();
-  const content = document.getElementById('bookContent').value.trim();
   const lang = document.getElementById('bookLang').value;
   if (!title) { showToast('请输入书名'); return; }
-  if (!content) { showToast('请输入书籍内容'); return; }
   if (!userId) { await initLibrary(); }
+
+  // PDF 直传模式：一步完成（上传 → 提取 → 分章 → 保存）
+  if (pendingPdfFile) {
+    showToast('正在上传并处理 PDF，请稍候...');
+    try {
+      const formData = new FormData();
+      formData.append('file', pendingPdfFile);
+      formData.append('user_id', userId);
+      formData.append('title', title);
+      formData.append('lang', lang);
+
+      const r = await fetch(`${API_BASE}/books/upload_pdf`, {
+        method: 'POST',
+        body: formData  // 不设 Content-Type，让浏览器自动处理 multipart
+      });
+      const d = await r.json();
+      if (d.success) {
+        const chInfo = d.chapter_count > 1 ? `，${d.chapter_count} 章` : '';
+        showToast(`PDF 保存成功！${d.sentence_count} 句${chInfo}`);
+        document.getElementById('bookTitle').value = '';
+        document.getElementById('bookContent').value = '';
+        document.getElementById('bookContent').placeholder = '粘贴书籍内容到这里...\n或点击下方按钮上传 .txt / .pdf 文件';
+        pendingPdfFile = null;
+        loadBookList();
+      } else {
+        showToast('PDF 处理失败: ' + d.error);
+      }
+    } catch(e) {
+      showToast('上传失败: ' + e.message);
+    }
+    return;
+  }
+
+  // 普通文本模式
+  const content = document.getElementById('bookContent').value.trim();
+  if (!content) { showToast('请输入书籍内容或选择文件'); return; }
 
   try {
     const r = await fetch(`${API_BASE}/books/save`, {

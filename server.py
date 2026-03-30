@@ -20,6 +20,7 @@ import urllib.parse
 import traceback
 import base64
 import io
+import cgi
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -440,7 +441,16 @@ class BilingualHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         try:
+            # PDF 上传用 multipart/form-data（二进制直传，不经过 base64）
+            if self.path == "/books/upload_pdf":
+                self.handle_pdf_upload()
+                return
+
             content_length = int(self.headers.get("Content-Length", 0))
+            # 限制最大 50MB（文本内容）
+            if content_length > 50 * 1024 * 1024:
+                self.send_json({"success": False, "error": "请求过大（最大 50MB）"})
+                return
             body = self.rfile.read(content_length)
             data = json.loads(body)
 
@@ -516,8 +526,78 @@ class BilingualHandler(SimpleHTTPRequestHandler):
             traceback.print_exc()
             self.send_json({"success": False, "error": str(e)})
 
+    def handle_pdf_upload(self):
+        """处理 PDF 文件上传（multipart/form-data）
+        一步完成：接收 PDF → 提取文本 → 分章 → 保存到书库
+        """
+        if not PDF_AVAILABLE:
+            self.send_json({"success": False, "error": "服务器未安装 PyPDF2，无法处理 PDF"})
+            return
+        try:
+            content_type = self.headers.get("Content-Type", "")
+            content_length = int(self.headers.get("Content-Length", 0))
+
+            # 限制 PDF 大小 100MB
+            if content_length > 100 * 1024 * 1024:
+                self.send_json({"success": False, "error": "PDF 文件过大（最大 100MB）"})
+                return
+
+            print(f"  📄 接收 PDF 上传: {content_length / 1024 / 1024:.1f} MB")
+
+            # 解析 multipart form data
+            environ = {
+                'REQUEST_METHOD': 'POST',
+                'CONTENT_TYPE': content_type,
+                'CONTENT_LENGTH': str(content_length),
+            }
+            form = cgi.FieldStorage(
+                fp=self.rfile,
+                headers=self.headers,
+                environ=environ
+            )
+
+            # 获取表单字段
+            pdf_field = form['file']
+            user_id = form.getvalue('user_id', '')
+            title = form.getvalue('title', '未命名')
+            lang = form.getvalue('lang', 'zh')
+
+            if not user_id:
+                self.send_json({"success": False, "error": "缺少用户ID"})
+                return
+
+            # 读取 PDF 数据
+            pdf_bytes = pdf_field.file.read()
+            print(f"  📄 PDF 大小: {len(pdf_bytes) / 1024:.0f} KB")
+
+            # 提取文本
+            text = extract_text_from_pdf(pdf_bytes)
+            print(f"  📄 提取文本: {len(text)} 字符")
+
+            # 保存到书库（save_book 会自动分章）
+            book_id = save_book(user_id, title, text, lang)
+            if book_id:
+                # 获取保存后的章节信息
+                book = get_book_content(user_id, book_id)
+                self.send_json({
+                    "success": True,
+                    "book_id": book_id,
+                    "title": title,
+                    "chapter_count": book.get("chapter_count", 1) if book else 1,
+                    "sentence_count": len(split_sentences(text)),
+                    "text_length": len(text)
+                })
+            else:
+                self.send_json({"success": False, "error": "保存失败"})
+        except KeyError as e:
+            self.send_json({"success": False, "error": f"缺少字段: {e}"})
+        except Exception as e:
+            print(f"  ❌ PDF 上传处理失败: {e}")
+            traceback.print_exc()
+            self.send_json({"success": False, "error": str(e)})
+
     def handle_extract_pdf(self, data):
-        """从 base64 编码的 PDF 中提取文本"""
+        """从 base64 编码的 PDF 中提取文本（保留旧接口兼容）"""
         pdf_base64 = data.get("pdf_data", "")
         if not pdf_base64:
             self.send_json({"success": False, "error": "缺少 PDF 数据"})
