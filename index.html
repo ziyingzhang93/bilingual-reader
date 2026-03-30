@@ -214,7 +214,7 @@
     <div class="lang-row">
       <label>输入语言：</label>
       <select class="lang-select" id="sourceLang">
-        <option value="auto">🔍 自动识别 Auto Detect</option>
+
         <option value="zh">中文 → 翻译成英文</option>
         <option value="en">English → 翻译成中文</option>
       </select>
@@ -236,7 +236,7 @@
     <div class="lang-row">
       <label>文件语言：</label>
       <select class="lang-select" id="fileLang">
-        <option value="auto">🔍 自动识别 Auto Detect</option>
+
         <option value="zh">中文 → 翻译成英文</option>
         <option value="en">English → 翻译成中文</option>
       </select>
@@ -272,7 +272,7 @@
       <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
         <input type="text" class="url-input" id="bookTitle" placeholder="书名 Book title" style="flex:1; min-width:150px;">
         <select class="lang-select" id="bookLang">
-          <option value="auto">🔍 自动</option>
+
           <option value="zh">中文</option>
           <option value="en">English</option>
         </select>
@@ -382,13 +382,29 @@ const API_BASE = window.location.origin;
 
 // ============ Auto language detection ============
 function detectLanguage(text) {
-  // 统计中文字符比例
-  const sample = text.slice(0, 2000); // 只取前2000字符判断
+  const sample = text.slice(0, 2000);
   const chineseChars = (sample.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
   const totalChars = sample.replace(/\s/g, '').length;
   if (totalChars === 0) return 'zh';
   return (chineseChars / totalChars) > 0.15 ? 'zh' : 'en';
 }
+
+function autoDetectAndUpdate(text, selectId) {
+  if (!text.trim()) return;
+  const lang = detectLanguage(text);
+  document.getElementById(selectId).value = lang;
+}
+
+// 监听粘贴和输入，自动切换语言
+document.addEventListener('DOMContentLoaded', () => {
+  const textInput = document.getElementById('textInput');
+  if (textInput) {
+    textInput.addEventListener('input', () => autoDetectAndUpdate(textInput.value, 'sourceLang'));
+    textInput.addEventListener('paste', (e) => {
+      setTimeout(() => autoDetectAndUpdate(textInput.value, 'sourceLang'), 50);
+    });
+  }
+});
 
 // ============ Tab switching ============
 function switchTab(name) {
@@ -436,7 +452,10 @@ function readFile(file) {
   } else {
     pendingPdfForRead = null;
     const reader = new FileReader();
-    reader.onload = e => { fileContent = e.target.result; };
+    reader.onload = e => {
+      fileContent = e.target.result;
+      autoDetectAndUpdate(fileContent, 'fileLang');
+    };
     reader.readAsText(file);
   }
 }
@@ -804,7 +823,10 @@ function loadBookFile(input) {
     pendingPdfFile = null;
     document.getElementById('bookContent').placeholder = '粘贴书籍内容到这里...\n或点击下方按钮上传 .txt / .pdf 文件';
     const reader = new FileReader();
-    reader.onload = e => { document.getElementById('bookContent').value = e.target.result; };
+    reader.onload = e => {
+      document.getElementById('bookContent').value = e.target.result;
+      autoDetectAndUpdate(e.target.result, 'bookLang');
+    };
     reader.readAsText(file);
   }
 }
