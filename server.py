@@ -167,6 +167,65 @@ def split_sentences(text):
     parts = re.split(r'(?<=[。！？.!?\n])\s*', text)
     return [s.strip() for s in parts if s.strip()]
 
+# ============ 章节检测 ============
+CHAPTER_PATTERNS = [
+    # 中文章节
+    r'^第[一二三四五六七八九十百千\d]+[章回节篇卷]',
+    r'^[一二三四五六七八九十]+[、.．]',
+    # 英文章节
+    r'^Chapter\s+\d+',
+    r'^CHAPTER\s+\d+',
+    r'^Part\s+\d+',
+    r'^PART\s+\d+',
+    r'^Section\s+\d+',
+    # 数字章节
+    r'^\d+[、.．]\s*\S',
+]
+CHAPTER_RE = re.compile('|'.join(CHAPTER_PATTERNS), re.MULTILINE)
+
+def split_chapters(text):
+    """将文本按章节拆分，返回 [{"title": "...", "content": "..."}]"""
+    lines = text.replace('\r\n', '\n').split('\n')
+    chapters = []
+    current_title = "开头 / Introduction"
+    current_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped and CHAPTER_RE.match(stripped):
+            # 保存前一章
+            if current_lines:
+                content = '\n'.join(current_lines).strip()
+                if content:
+                    chapters.append({"title": current_title, "content": content})
+            current_title = stripped
+            current_lines = []
+        else:
+            current_lines.append(line)
+
+    # 保存最后一章
+    if current_lines:
+        content = '\n'.join(current_lines).strip()
+        if content:
+            chapters.append({"title": current_title, "content": content})
+
+    # 如果只检测到一章，按固定大小分段（每段约50句）
+    if len(chapters) <= 1:
+        all_sentences = split_sentences(text)
+        if len(all_sentences) > 60:
+            chunk_size = 50
+            chapters = []
+            for i in range(0, len(all_sentences), chunk_size):
+                chunk = all_sentences[i:i+chunk_size]
+                part_num = i // chunk_size + 1
+                chapters.append({
+                    "title": f"第 {part_num} 部分 / Part {part_num}",
+                    "content": '\n'.join(chunk)
+                })
+        # else: 短文本不需要分章
+
+    return chapters if chapters else [{"title": "全文", "content": text}]
+
 # ============ 批量翻译（核心优化） ============
 def translate_batch(sentences, source_lang, target_lang):
     """
@@ -234,23 +293,34 @@ def get_user_dir(user_id):
     return user_dir
 
 def save_book(user_id, title, content, lang="zh"):
-    """保存书籍到用户书库"""
+    """保存书籍到用户书库（自动分章）"""
     user_dir = get_user_dir(user_id)
     if not user_dir:
         return False
     book_id = hashlib.md5(f"{title}:{content[:100]}".encode()).hexdigest()[:12]
+
+    # 自动分章
+    chapters = split_chapters(content)
+    chapter_data = []
+    total_sentences = 0
+    for ch in chapters:
+        sents = split_sentences(ch["content"])
+        chapter_data.append({"title": ch["title"], "sentences": sents})
+        total_sentences += len(sents)
+
     book_data = {
         "id": book_id,
         "title": title,
         "lang": lang,
-        "content": content,
-        "sentences": split_sentences(content),
+        "content": content,  # 保留原文用于下载
+        "chapters": chapter_data,
+        "sentences": split_sentences(content),  # 兼容旧格式
         "created": __import__('time').strftime("%Y-%m-%d %H:%M")
     }
     filepath = os.path.join(user_dir, f"{book_id}.json")
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(book_data, f, ensure_ascii=False)
-    print(f"  📚 保存书籍: {title} ({len(book_data['sentences'])} 句) → {user_id}")
+    print(f"  📚 保存书籍: {title} ({len(chapters)} 章, {total_sentences} 句) → {user_id}")
     return book_id
 
 def list_books(user_id):
@@ -265,19 +335,21 @@ def list_books(user_id):
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                chapters = data.get("chapters", [])
                 books.append({
                     "id": data["id"],
                     "title": data["title"],
                     "lang": data.get("lang", "zh"),
                     "sentence_count": len(data.get("sentences", [])),
+                    "chapter_count": len(chapters) if chapters else 1,
                     "created": data.get("created", "")
                 })
             except:
                 pass
     return books
 
-def get_book_content(user_id, book_id):
-    """获取书籍内容（逐句返回，不返回原始全文）"""
+def get_book_content(user_id, book_id, chapter_index=None):
+    """获取书籍内容（支持按章节读取）"""
     user_dir = get_user_dir(user_id)
     if not user_dir:
         return None
@@ -286,13 +358,46 @@ def get_book_content(user_id, book_id):
         return None
     with open(filepath, "r", encoding="utf-8") as f:
         data = json.load(f)
-    # 只返回逐句内容，不返回可下载的原始全文
-    return {
+
+    chapters = data.get("chapters", [])
+    # 兼容旧格式（无章节的书）
+    if not chapters:
+        chapters = [{"title": "全文", "sentences": data.get("sentences", [])}]
+
+    chapter_list = [{"title": ch["title"], "sentence_count": len(ch["sentences"])} for ch in chapters]
+
+    result = {
         "id": data["id"],
         "title": data["title"],
         "lang": data.get("lang", "zh"),
-        "sentences": data.get("sentences", []),
+        "chapter_count": len(chapters),
+        "chapters": chapter_list,
     }
+
+    # 如果指定了章节索引，只返回该章节的句子
+    if chapter_index is not None and 0 <= chapter_index < len(chapters):
+        result["current_chapter"] = chapter_index
+        result["current_chapter_title"] = chapters[chapter_index]["title"]
+        result["sentences"] = chapters[chapter_index]["sentences"]
+    else:
+        # 默认返回第一章
+        result["current_chapter"] = 0
+        result["current_chapter_title"] = chapters[0]["title"]
+        result["sentences"] = chapters[0]["sentences"]
+
+    return result
+
+def get_book_raw(user_id, book_id):
+    """获取书籍原始全文（用于下载自己上传的内容）"""
+    user_dir = get_user_dir(user_id)
+    if not user_dir:
+        return None
+    filepath = os.path.join(user_dir, f"{book_id}.json")
+    if not os.path.exists(filepath):
+        return None
+    with open(filepath, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return {"title": data["title"], "content": data.get("content", "")}
 
 def delete_book(user_id, book_id):
     """删除书籍"""
@@ -353,6 +458,8 @@ class BilingualHandler(SimpleHTTPRequestHandler):
                 self.handle_book_read(data)
             elif self.path == "/books/delete":
                 self.handle_book_delete(data)
+            elif self.path == "/books/download":
+                self.handle_book_download(data)
             elif self.path == "/extract_pdf":
                 self.handle_extract_pdf(data)
             elif self.path == "/user/create":
@@ -458,17 +565,33 @@ class BilingualHandler(SimpleHTTPRequestHandler):
         self.send_json({"success": True, "books": books})
 
     def handle_book_read(self, data):
-        """读取书籍内容（逐句，不可下载）"""
+        """读取书籍内容（按章节返回）"""
+        user_id = data.get("user_id", "")
+        book_id = data.get("book_id", "")
+        chapter_index = data.get("chapter", None)
+        if not user_id or not book_id:
+            self.send_json({"success": False, "error": "缺少参数"})
+            return
+        if chapter_index is not None:
+            chapter_index = int(chapter_index)
+        book = get_book_content(user_id, book_id, chapter_index)
+        if book:
+            self.send_json({"success": True, "book": book})
+        else:
+            self.send_json({"success": False, "error": "书籍不存在"})
+
+    def handle_book_download(self, data):
+        """下载用户自己上传的书籍原文"""
         user_id = data.get("user_id", "")
         book_id = data.get("book_id", "")
         if not user_id or not book_id:
             self.send_json({"success": False, "error": "缺少参数"})
             return
-        book = get_book_content(user_id, book_id)
-        if book:
-            self.send_json({"success": True, "book": book})
+        book = get_book_raw(user_id, book_id)
+        if book and book["content"]:
+            self.send_json({"success": True, "title": book["title"], "content": book["content"]})
         else:
-            self.send_json({"success": False, "error": "书籍不存在"})
+            self.send_json({"success": False, "error": "书籍不存在或内容为空"})
 
     def handle_book_delete(self, data):
         """删除书籍"""

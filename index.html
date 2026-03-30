@@ -684,6 +684,11 @@ function backToInput() {
   stopAll();
   document.getElementById('readerSection').classList.remove('active');
   document.querySelector('.tabs').style.display = 'flex';
+  // 移除章节导航
+  const nav = document.getElementById('chapterNav');
+  if (nav) nav.remove();
+  currentBookId = null;
+  currentBookMeta = null;
   switchTab('paste');
 }
 
@@ -810,44 +815,63 @@ async function loadBookList() {
     const d = await r.json();
     const list = document.getElementById('bookList');
     if (d.success && d.books.length > 0) {
-      list.innerHTML = d.books.map(b => `
+      list.innerHTML = d.books.map(b => {
+        const chapterInfo = b.chapter_count > 1 ? ` · ${b.chapter_count} 章` : '';
+        return `
         <div class="book-item" onclick="readBook('${b.id}')">
           <div class="book-info">
             <div class="book-title">${escapeHtml(b.title)}</div>
-            <div class="book-meta">${b.lang === 'zh' ? '中文' : 'English'} · ${b.sentence_count} 句 · ${b.created}</div>
+            <div class="book-meta">${b.lang === 'zh' ? '中文' : 'English'} · ${b.sentence_count} 句${chapterInfo} · ${b.created}</div>
           </div>
           <div class="book-actions">
             <button class="btn btn-primary" onclick="event.stopPropagation(); readBook('${b.id}')">📖 阅读</button>
+            <button class="btn btn-secondary" onclick="event.stopPropagation(); downloadBook('${b.id}')" title="下载原文">⬇️</button>
             <button class="btn btn-secondary" onclick="event.stopPropagation(); deleteBook('${b.id}', '${escapeHtml(b.title)}')">🗑️</button>
           </div>
-        </div>
-      `).join('');
+        </div>`;
+      }).join('');
     } else {
       list.innerHTML = '<p style="color:var(--text-light); font-size:14px; text-align:center; padding:20px;">书库为空，请上传你的第一本书</p>';
     }
   } catch(e) { console.error(e); }
 }
 
-async function readBook(bookId) {
+// 当前阅读的书籍状态
+let currentBookId = null;
+let currentBookMeta = null;
+
+async function readBook(bookId, chapterIndex) {
   if (!userId) return;
+  currentBookId = bookId;
   document.querySelectorAll('.input-panel').forEach(p => p.classList.remove('active'));
   document.querySelector('.tabs').style.display = 'none';
   document.getElementById('loading').classList.add('active');
-  document.getElementById('loadingText').textContent = '正在加载书籍并翻译...';
+  document.getElementById('loadingText').textContent = '正在加载书籍...';
 
   try {
+    const params = { user_id: userId, book_id: bookId };
+    if (chapterIndex !== undefined) params.chapter = chapterIndex;
+
     const r = await fetch(`${API_BASE}/books/read`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ user_id: userId, book_id: bookId })
+      body: JSON.stringify(params)
     });
     const d = await r.json();
     if (d.success && d.book) {
       const book = d.book;
+      currentBookMeta = book;
+
       const text = book.sentences.join('\n');
       const sourceLang = book.lang || 'zh';
       const target = sourceLang === 'zh' ? 'en' : 'zh';
 
-      // 批量翻译
+      const chTitle = book.current_chapter_title || '';
+      const chNum = (book.current_chapter || 0) + 1;
+      const totalCh = book.chapter_count || 1;
+      document.getElementById('loadingText').textContent =
+        `正在翻译: ${chTitle} (${chNum}/${totalCh})...`;
+
+      // 批量翻译当前章节
       const tr = await fetch(`${API_BASE}/translate_batch`, {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ text, source: sourceLang, target })
@@ -857,6 +881,8 @@ async function readBook(bookId) {
         sentences = td.pairs;
         document.getElementById('loading').classList.remove('active');
         renderReader();
+        // 如果有多章，显示章节导航
+        if (book.chapter_count > 1) renderChapterNav(book);
       } else {
         throw new Error(td.error || '翻译失败');
       }
@@ -868,6 +894,63 @@ async function readBook(bookId) {
     showToast('加载失败: ' + e.message);
     backToInput();
   }
+}
+
+function renderChapterNav(book) {
+  // 在阅读区域顶部插入章节导航
+  let nav = document.getElementById('chapterNav');
+  if (!nav) {
+    nav = document.createElement('div');
+    nav.id = 'chapterNav';
+    nav.style.cssText = 'background:var(--bg-card); border-radius:12px; padding:12px 16px; margin-bottom:16px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; box-shadow:0 1px 3px rgba(0,0,0,0.1);';
+    const reader = document.getElementById('reader');
+    reader.parentNode.insertBefore(nav, reader);
+  }
+
+  const cur = book.current_chapter || 0;
+  const total = book.chapter_count || 1;
+  const title = book.current_chapter_title || '';
+
+  let html = '';
+  if (cur > 0) {
+    html += `<button class="btn btn-secondary" style="padding:6px 12px; font-size:13px;" onclick="readBook('${currentBookId}', ${cur - 1})">⬅️ 上一章</button>`;
+  }
+  html += `<select onchange="readBook('${currentBookId}', parseInt(this.value))" style="flex:1; min-width:120px; padding:6px 10px; border-radius:8px; border:1px solid var(--border); font-size:13px; background:white;">`;
+  for (let i = 0; i < total; i++) {
+    const ch = book.chapters[i];
+    const sel = i === cur ? ' selected' : '';
+    html += `<option value="${i}"${sel}>${ch.title} (${ch.sentence_count} 句)</option>`;
+  }
+  html += `</select>`;
+  if (cur < total - 1) {
+    html += `<button class="btn btn-primary" style="padding:6px 12px; font-size:13px;" onclick="readBook('${currentBookId}', ${cur + 1})">下一章 ➡️</button>`;
+  }
+  nav.innerHTML = html;
+}
+
+async function downloadBook(bookId) {
+  if (!userId) return;
+  try {
+    const r = await fetch(`${API_BASE}/books/download`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ user_id: userId, book_id: bookId })
+    });
+    const d = await r.json();
+    if (d.success) {
+      const blob = new Blob([d.content], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = (d.title || 'book') + '.txt';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('下载成功！');
+    } else {
+      showToast('下载失败: ' + d.error);
+    }
+  } catch(e) { showToast('下载失败: ' + e.message); }
 }
 
 async function deleteBook(bookId, title) {
